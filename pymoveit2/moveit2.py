@@ -18,6 +18,7 @@ from moveit_msgs.msg import (
     OrientationConstraint,
     PlanningScene,
     PositionConstraint,
+    RobotState,
 )
 from moveit_msgs.srv import (
     ApplyPlanningScene,
@@ -349,10 +350,17 @@ class MoveIt2:
         weight_orientation: float = 1.0,
         cartesian_max_step: float = 0.0025,
         cartesian_fraction_threshold: float = 0.0,
-    ):
+        start_joint_state: Optional[Union[JointState, List[float]]] = None,
+    ) -> bool:
         """
         Plan and execute motion based on previously set goals. Optional arguments can be
         passed in to internally use `set_pose_goal()` to define a goal during the call.
+
+        ``start_joint_state`` overrides the planning start state. The monitored
+        ``/joint_states`` can lag behind the true robot state (planning then starts from a
+        stale pose, e.g. a later point of the previous trajectory), so callers may pass
+        their own up-to-date state to plan from it. Returns ``True`` when a motion was
+        planned and dispatched, ``False`` when planning failed or the call was skipped.
         """
 
         if isinstance(pose, PoseStamped):
@@ -396,7 +404,7 @@ class MoveIt2:
                 self._node.get_logger().warning(
                     "Controller is already following a trajectory. Skipping motion."
                 )
-                return
+                return False
 
             # Set goal
             self.set_pose_goal(
@@ -409,34 +417,50 @@ class MoveIt2:
                 weight_position=weight_position,
                 weight_orientation=weight_orientation,
             )
-            # Define starting state as the current state
-            if self.joint_state is not None:
+            # Plan from move_group's own live current state: leave start_state empty
+            # so the planner seeds from the same monitor it validates against, which
+            # eliminates the stale-cache "start point deviates" aborts. A deliberate
+            # list of joint positions is still honored as an explicit start.
+            if isinstance(start_joint_state, list):
                 self.__move_action_goal.request.start_state.joint_state = (
-                    self.joint_state
+                    init_joint_state(
+                        joint_names=self.__joint_names,
+                        joint_positions=start_joint_state,
+                    )
                 )
+            else:
+                # Plan from move_group's own current state: reset start_state to an
+                # empty RobotState marked is_diff so move_group substitutes its live
+                # current state (a bare empty JointState is rejected with "Found empty
+                # JointState message").
+                self.__move_action_goal.request.start_state = RobotState(is_diff=True)
             # Send to goal to the server (async) - both planning and execution
             self._send_goal_async_move_action()
             # Clear all previous goal constrains
             self.clear_goal_constraints()
             self.clear_path_constraints()
+            return True
 
         else:
             # Plan via MoveIt 2 and then execute directly with the controller
-            self.execute(
-                self.plan(
-                    position=pose_stamped.pose.position,
-                    quat_xyzw=pose_stamped.pose.orientation,
-                    frame_id=pose_stamped.header.frame_id,
-                    target_link=target_link,
-                    tolerance_position=tolerance_position,
-                    tolerance_orientation=tolerance_orientation,
-                    weight_position=weight_position,
-                    weight_orientation=weight_orientation,
-                    cartesian=cartesian,
-                    max_step=cartesian_max_step,
-                    cartesian_fraction_threshold=cartesian_fraction_threshold,
-                )
+            trajectory = self.plan(
+                position=pose_stamped.pose.position,
+                quat_xyzw=pose_stamped.pose.orientation,
+                frame_id=pose_stamped.header.frame_id,
+                target_link=target_link,
+                tolerance_position=tolerance_position,
+                tolerance_orientation=tolerance_orientation,
+                weight_position=weight_position,
+                weight_orientation=weight_orientation,
+                cartesian=cartesian,
+                max_step=cartesian_max_step,
+                cartesian_fraction_threshold=cartesian_fraction_threshold,
+                start_joint_state=start_joint_state,
             )
+            if trajectory is None:
+                return False
+            self.execute(trajectory)
+            return True
 
     def move_to_configuration(
         self,
@@ -444,10 +468,15 @@ class MoveIt2:
         joint_names: Optional[List[str]] = None,
         tolerance: float = 0.001,
         weight: float = 1.0,
-    ):
+        start_joint_state: Optional[Union[JointState, List[float]]] = None,
+    ) -> bool:
         """
         Plan and execute motion based on previously set goals. Optional arguments can be
         passed in to internally use `set_joint_goal()` to define a goal during the call.
+
+        ``start_joint_state`` overrides the planning start state (see ``move_to_pose``).
+        Returns ``True`` when a motion was planned and dispatched, ``False`` when planning
+        failed or the call was skipped.
         """
 
         if self.__use_move_group_action:
@@ -457,7 +486,7 @@ class MoveIt2:
                 self._node.get_logger().warning(
                     "Controller is already following a trajectory. Skipping motion."
                 )
-                return
+                return False
 
             # Set goal
             self.set_joint_goal(
@@ -466,27 +495,43 @@ class MoveIt2:
                 tolerance=tolerance,
                 weight=weight,
             )
-            # Define starting state as the current state
-            if self.joint_state is not None:
+            # Plan from move_group's own live current state: leave start_state empty
+            # so the planner seeds from the same monitor it validates against, which
+            # eliminates the stale-cache "start point deviates" aborts. A deliberate
+            # list of joint positions is still honored as an explicit start.
+            if isinstance(start_joint_state, list):
                 self.__move_action_goal.request.start_state.joint_state = (
-                    self.joint_state
+                    init_joint_state(
+                        joint_names=self.__joint_names,
+                        joint_positions=start_joint_state,
+                    )
                 )
+            else:
+                # Plan from move_group's own current state: reset start_state to an
+                # empty RobotState marked is_diff so move_group substitutes its live
+                # current state (a bare empty JointState is rejected with "Found empty
+                # JointState message").
+                self.__move_action_goal.request.start_state = RobotState(is_diff=True)
             # Send to goal to the server (async) - both planning and execution
             self._send_goal_async_move_action()
             # Clear all previous goal constrains
             self.clear_goal_constraints()
             self.clear_path_constraints()
+            return True
 
         else:
             # Plan via MoveIt 2 and then execute directly with the controller
-            self.execute(
-                self.plan(
-                    joint_positions=joint_positions,
-                    joint_names=joint_names,
-                    tolerance_joint_position=tolerance,
-                    weight_joint_position=weight,
-                )
+            trajectory = self.plan(
+                joint_positions=joint_positions,
+                joint_names=joint_names,
+                tolerance_joint_position=tolerance,
+                weight_joint_position=weight,
+                start_joint_state=start_joint_state,
             )
+            if trajectory is None:
+                return False
+            self.execute(trajectory)
+            return True
 
     def plan(
         self,
@@ -630,57 +675,22 @@ class MoveIt2:
                 tolerance=tolerance_joint_position,
                 weight=weight_joint_position,
             )
-        # Define starting state for the plan (default to the current state)
-        try:
-            while start_joint_state is None:
-                self._node.get_logger().warning(
-                    message="Joint states are not available yet!"
-                )
-                if self.__joint_state is not None:
-                    start_joint_state = self.__joint_state
-                    break
-                else:
-                    rclpy.spin_once(self._node, timeout_sec=1.0)
-        except ExternalShutdownException:
-            return None
-
-        self._node.get_logger().info(message="Joint states are available now")
-
-        # Ensure the request actually uses the intended start state
-        if start_joint_state is not None:
-            if isinstance(start_joint_state, JointState):
-                self.__move_action_goal.request.start_state.joint_state = (
-                    start_joint_state
-                )
-            else:
-                # start_joint_state is a list of positions
-                self.__move_action_goal.request.start_state.joint_state = (
-                    init_joint_state(
-                        joint_names=self.__joint_names,
-                        joint_positions=start_joint_state,
-                    )
-                )
-        elif self.joint_state is not None:
-            # Default to the latest observed state if none provided
-            self.__move_action_goal.request.start_state.joint_state = self.joint_state
-
-        # Ensure the request actually uses the intended start state
-        if start_joint_state is not None:
-            if isinstance(start_joint_state, JointState):
-                self.__move_action_goal.request.start_state.joint_state = (
-                    start_joint_state
-                )
-            else:
-                # start_joint_state is a list of positions
-                self.__move_action_goal.request.start_state.joint_state = (
-                    init_joint_state(
-                        joint_names=self.__joint_names,
-                        joint_positions=start_joint_state,
-                    )
-                )
-        elif self.joint_state is not None:
-            # Default to the latest observed state if none provided
-            self.__move_action_goal.request.start_state.joint_state = self.joint_state
+        # Define the starting state for the plan. Plan from move_group's own live
+        # current state by leaving start_state empty, so the planner seeds from the
+        # same monitor it validates against. Pinning a passed-in/cached snapshot is
+        # what caused the "start point deviates from current robot state" aborts: the
+        # cache can be frozen by a whole motion while the previous trajectory
+        # executes, and it is a different state than move_group's live monitor.
+        # A deliberate list of joint positions is still honored as an explicit start.
+        if isinstance(start_joint_state, list):
+            self.__move_action_goal.request.start_state.joint_state = init_joint_state(
+                joint_names=self.__joint_names,
+                joint_positions=start_joint_state,
+            )
+        else:
+            # Plan from move_group's own current state (see move-action branch);
+            # is_diff avoids the "Found empty JointState message" rejection.
+            self.__move_action_goal.request.start_state = RobotState(is_diff=True)
 
         # Plan trajectory asynchronously by service call
         if cartesian:

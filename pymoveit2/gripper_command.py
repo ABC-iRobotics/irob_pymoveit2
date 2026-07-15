@@ -1,4 +1,6 @@
 import threading
+
+import rclpy
 from typing import List, Optional, Union
 
 from action_msgs.msg import GoalStatus
@@ -134,7 +136,6 @@ class GripperCommand:
         # Internal states that monitor the current motion requests and execution
         self.__is_motion_requested = False
         self.__is_executing = False
-        self.__wait_until_executed_rate = self._node.create_rate(1000.0)
 
     def __call__(self):
         """
@@ -160,13 +161,14 @@ class GripperCommand:
         """
 
         if skip_if_noop and self.is_open:
-            return
+            return True  # already in the desired state
 
         if self.__ignore_new_calls_while_executing and self.__is_executing:
-            return
+            return False
         self.__is_motion_requested = True
 
         self.__send_goal_async_gripper_command(self.__open_gripper_command_goal)
+        return True
 
     def close(self, skip_if_noop: bool = False):
         """
@@ -175,28 +177,32 @@ class GripperCommand:
         """
 
         if skip_if_noop and self.is_closed:
-            return
+            return True  # already in the desired state
 
         if self.__ignore_new_calls_while_executing and self.__is_executing:
-            return
+            return False
         self.__is_motion_requested = True
 
         self.__send_goal_async_gripper_command(self.__close_gripper_command_goal)
+        return True
 
-    def move_to_position(self, position: float):
+    def move_to_position(self, position: float, start_joint_state=None):
         """
         Move the gripper to a specific position.
         - `position` - Desired position of the gripper.
+        `start_joint_state` is accepted for interface parity but unused here: the gripper
+        command action targets an absolute position, so there is no planning start state.
         """
 
         if self.__ignore_new_calls_while_executing and self.__is_executing:
-            return
+            return False
         self.__is_motion_requested = True
 
         gripper_cmd_goal = GripperCommandAction.Goal()
         gripper_cmd_goal.command.position = position
         gripper_cmd_goal.command.max_effort = self.__max_effort
         self.__send_goal_async_gripper_command(gripper_cmd_goal)
+        return True
 
     def reset_open(self, **kwargs):
         """
@@ -237,7 +243,12 @@ class GripperCommand:
             return False
 
         while self.__is_motion_requested or self.__is_executing:
-            self.__wait_until_executed_rate.sleep()
+            # Match MoveIt2.wait_until_executed (the working arm path): spin the node
+            # directly instead of create_rate(1000.0).sleep(). create_rate waits on the
+            # (sim) clock through an executor-serviced timer, so before Isaac's /clock is
+            # advancing on start it blocks forever on the rate's internal condition lock —
+            # the intermittent gripper "mutex" hang.
+            rclpy.spin_once(self._node, timeout_sec=1.0)
         return True
 
     def __joint_state_callback(self, msg: JointState):

@@ -118,9 +118,9 @@ class GripperInterface(MoveIt2Gripper, GripperCommand):
             self._node.get_logger().error(
                 f"Unable to close the gripper because the appropriate interface cannot be determined."
             )
-            return
+            return False
 
-        self._interface.open(self=self, skip_if_noop=skip_if_noop)
+        return self._interface.open(self=self, skip_if_noop=skip_if_noop)
 
     def close(self, skip_if_noop: bool = False):
         """
@@ -134,14 +134,17 @@ class GripperInterface(MoveIt2Gripper, GripperCommand):
             self._node.get_logger().error(
                 f"Unable to close the gripper because the appropriate interface cannot be determined."
             )
-            return
+            return False
 
-        self._interface.close(self=self, skip_if_noop=skip_if_noop)
+        return self._interface.close(self=self, skip_if_noop=skip_if_noop)
 
-    def move_to_position(self, position: float):
+    def move_to_position(self, position: float, start_joint_state=None):
         """
         Move the gripper to a specific position.
         - `position` - Desired position of the gripper.
+        - `start_joint_state` - Optional planning start state. Pass the live gripper
+          state (from /joint_states) so a MoveIt-planned gripper motion starts from the
+          real pose instead of a stale/monitored one (which makes it jump on first use).
         """
 
         if self._interface is None:
@@ -151,9 +154,11 @@ class GripperInterface(MoveIt2Gripper, GripperCommand):
                 "Unable to move the gripper to a position because the appropriate "
                 "interface cannot be determined."
             )
-            return
+            return False
 
-        self._interface.move_to_position(self=self, position=position)
+        return self._interface.move_to_position(
+            self=self, position=position, start_joint_state=start_joint_state
+        )
 
     def reset_open(self, sync: bool = True):
         """

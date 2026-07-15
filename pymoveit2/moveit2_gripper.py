@@ -144,12 +144,13 @@ class MoveIt2Gripper(MoveIt2):
         """
 
         if skip_if_noop and self.is_open:
-            return
+            return True  # already in the desired state
 
         if self.__skip_planning:
             self.__open_without_planning()
+            return True
         else:
-            self.move_to_configuration(
+            return self.move_to_configuration(
                 joint_positions=self.__open_gripper_joint_positions
             )
 
@@ -160,23 +161,27 @@ class MoveIt2Gripper(MoveIt2):
         """
 
         if skip_if_noop and self.is_closed:
-            return
+            return True  # already in the desired state
 
         if self.__skip_planning:
             self.__close_without_planning()
+            return True
         else:
-            self.move_to_configuration(
+            return self.move_to_configuration(
                 joint_positions=self.__closed_gripper_joint_positions
             )
 
-    def move_to_position(self, position: float):
+    def move_to_position(self, position: float, start_joint_state=None):
         """
         Move the gripper to a specific position.
         - `position` - Desired position of the gripper
+        - `start_joint_state` - Optional planning start state (see MoveIt2.plan).
         """
 
         joint_positions = [position for _ in self.joint_names]
-        self.move_to_configuration(joint_positions=joint_positions)
+        return self.move_to_configuration(
+            joint_positions=joint_positions, start_joint_state=start_joint_state
+        )
 
     def reset_open(self):
         """
