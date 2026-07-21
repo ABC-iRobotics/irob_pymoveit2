@@ -16,7 +16,7 @@ from rclpy.qos import (
 )
 from sensor_msgs.msg import JointState
 
-from pymoveit2.utils import enum_to_str
+from pymoveit2.utils import enum_to_str, spin_or_wait
 
 
 class GripperCommand:
@@ -243,12 +243,13 @@ class GripperCommand:
             return False
 
         while self.__is_motion_requested or self.__is_executing:
-            # Match MoveIt2.wait_until_executed (the working arm path): spin the node
-            # directly instead of create_rate(1000.0).sleep(). create_rate waits on the
-            # (sim) clock through an executor-serviced timer, so before Isaac's /clock is
-            # advancing on start it blocks forever on the rate's internal condition lock —
-            # the intermittent gripper "mutex" hang.
-            rclpy.spin_once(self._node, timeout_sec=1.0)
+            # Advance callbacks without a create_rate(...).sleep() (which waits on the
+            # sim /clock via an executor-serviced timer and blocks before /clock is
+            # advancing). spin_or_wait yields to the external executor when one is
+            # already spinning this node, instead of hijacking it onto the global
+            # executor — that concurrent double-spin corrupts the wait set and hangs
+            # every later service reply (e.g. PoseRequest). See utils.spin_or_wait.
+            spin_or_wait(self._node)
         return True
 
     def __joint_state_callback(self, msg: JointState):

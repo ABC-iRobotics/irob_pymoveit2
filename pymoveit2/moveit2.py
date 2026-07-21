@@ -44,7 +44,7 @@ from shape_msgs.msg import Mesh, MeshTriangle, SolidPrimitive
 from std_msgs.msg import Header, String
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
-from pymoveit2.utils import enum_to_str
+from pymoveit2.utils import enum_to_str, spin_or_wait
 
 
 class MoveIt2State(Enum):
@@ -570,7 +570,7 @@ class MoveIt2:
             return None
 
         while not future.done():
-            rclpy.spin_once(self._node, timeout_sec=1.0)
+            spin_or_wait(self._node)
 
         return self.get_trajectory(
             future,
@@ -797,7 +797,7 @@ class MoveIt2:
             return False
 
         while self.__is_motion_requested or self.__is_executing:
-            rclpy.spin_once(self._node, timeout_sec=1.0)
+            spin_or_wait(self._node)
 
         return self.motion_suceeded
 
@@ -1239,7 +1239,7 @@ class MoveIt2:
             return None
 
         while not future.done():
-            rclpy.spin_once(self._node, timeout_sec=1.0)
+            spin_or_wait(self._node)
 
         return self.get_compute_fk_result(future, fk_link_names=fk_link_names)
 
@@ -1332,7 +1332,7 @@ class MoveIt2:
             return None
 
         while not future.done():
-            rclpy.spin_once(self._node, timeout_sec=1.0)
+            spin_or_wait(self._node)
 
         return self.get_compute_ik_result(future)
 
@@ -1881,7 +1881,7 @@ class MoveIt2:
         )
 
         while not planning_scene_future.done():
-            rclpy.spin_once(self._node, timeout_sec=1.0)
+            spin_or_wait(self._node)
 
         self.__planning_scene = planning_scene_future.result().scene
         return True
