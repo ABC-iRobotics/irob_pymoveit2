@@ -74,7 +74,9 @@ class GripperInterface(MoveIt2Gripper, GripperCommand):
 
         self.__determine_interface()
 
-    def __determine_interface(self, timeout_sec=1.0):
+    # ponytail: one probe; 60 s covers a gripper controller spawned alongside the caller. A gripper
+    # without a GripperCommand server waits the full 60 s before falling back to MoveIt2Gripper.
+    def __determine_interface(self, timeout_sec=60.0):
         if self.gripper_command_action_client.wait_for_server(timeout_sec=timeout_sec):
             self._interface = GripperCommand
         elif self._execute_trajectory_action_client.wait_for_server(
