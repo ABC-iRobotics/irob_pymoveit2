@@ -72,9 +72,14 @@ class GripperInterface(MoveIt2Gripper, GripperCommand):
             gripper_command_action_name=gripper_command_action_name,
         )
 
+        self._interface = None
         self.__determine_interface()
 
     def __determine_interface(self, timeout_sec=1.0):
+        if self._interface is MoveIt2Gripper:
+            # Re-check before each new command, without waiting: a GripperCommand server that came up
+            # after the first probe (its controller spawned alongside the caller) replaces the fallback.
+            timeout_sec = 0.0
         if self.gripper_command_action_client.wait_for_server(timeout_sec=timeout_sec):
             self._interface = GripperCommand
         elif self._execute_trajectory_action_client.wait_for_server(
@@ -112,7 +117,7 @@ class GripperInterface(MoveIt2Gripper, GripperCommand):
         - `skip_if_noop` - No action will be performed if the gripper is already open.
         """
 
-        if self._interface is None:
+        if self._interface is not GripperCommand:
             self.__determine_interface()
         if self._interface is None:
             self._node.get_logger().error(
@@ -128,7 +133,7 @@ class GripperInterface(MoveIt2Gripper, GripperCommand):
         - `skip_if_noop` - No action will be performed if the gripper is not open.
         """
 
-        if self._interface is None:
+        if self._interface is not GripperCommand:
             self.__determine_interface()
         if self._interface is None:
             self._node.get_logger().error(
@@ -147,7 +152,7 @@ class GripperInterface(MoveIt2Gripper, GripperCommand):
           real pose instead of a stale/monitored one (which makes it jump on first use).
         """
 
-        if self._interface is None:
+        if self._interface is not GripperCommand:
             self.__determine_interface()
         if self._interface is None:
             self._node.get_logger().error(
@@ -166,7 +171,7 @@ class GripperInterface(MoveIt2Gripper, GripperCommand):
         This is useful for simulated robots that allow instantaneous reset of joints.
         """
 
-        if self._interface is None:
+        if self._interface is not GripperCommand:
             self.__determine_interface()
         if self._interface is None:
             self._node.get_logger().error(
@@ -182,7 +187,7 @@ class GripperInterface(MoveIt2Gripper, GripperCommand):
         This is useful for simulated robots that allow instantaneous reset of joints.
         """
 
-        if self._interface is None:
+        if self._interface is not GripperCommand:
             self.__determine_interface()
         if self._interface is None:
             self._node.get_logger().error(
